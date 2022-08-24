@@ -28,6 +28,16 @@
 *.hta linguist-detectable=true
 *.hta linguist-documentation=false
 *.hta linguist-language=HTML
+# GSC source file
+*.csc linguist-detectable=true
+*.csc linguist-documentation=false
+*.csc linguist-language=GSC
+*.gsc linguist-detectable=true
+*.gsc linguist-documentation=false
+*.gsc linguist-language=GSC
+*.gsh linguist-detectable=true
+*.gsh linguist-documentation=false
+*.gsh linguist-language=GSC
 # CSS (Cascade Styling Sheets) stylesheet file
 *.css linguist-detectable=true
 *.css linguist-documentation=false
@@ -165,6 +175,6 @@
 
 # File info
 # File type: gitattributes file (.gitattributes)
-# File version: 4 (2022, Tuesday, June 28th at 2:32 pm PST)
-# Line count (including blank lines and compiler line): 171
+# File version: 5 (2022, Wednesday, August 24th at 4:34 pm PST)
+# Line count (including blank lines and compiler line): 181
 # End of script
