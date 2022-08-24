@@ -1,406 +1,660 @@
 
 ***
 
-# <projectName>
+![/GSC_Language_SquareLogo_V1_HighCompression.png](/GSC_Language_SquareLogo_V1_HighCompression.png)
 
-![{Project icon} This image failed to load. It may be due to the file not being reached, or a general error. Reload the page to fix a possible general error.](Image.svg)
+### Learning GSC (programming language)
 
-# By:
+I know very little about the GSC programming language. This document will go over all of my knowledge of the GSC programming language. Due to the purpose of the language, I don't intend to go very far with it.
 
-<!-- ![{Developer name} This image failed to load. It may be due to the file not being reached, or a general error. Reload the page to fix a possible general error.](Image2.svg) !-->
+This document heavily relies on reference to [`this script`](https://github.com/seanpm2001/EliotDucky_zm_weap_spike_launcher/blob/main/zm_weap_spike_launcher.gsc)
 
-## [Seanpm2001](https://github.com/seanpm2001/), [<developerName>](https://github.com/<developerName>/) Et; Al.
+Here is an archived copy of it:
+
+<details><summary><p lang="en"><b>Click/tap here to expand/collapse the original source</b></p></summary>
+
+[`📄️ View this file separately`](/GSC/Sampled/EliotDucky/zm_weap_spike_launcher.gsc)
+
+```gsc
+#using scripts\shared\array_shared;
+#using scripts\shared\callbacks_shared;
+#using scripts\shared\hud_util_shared;
+#using scripts\shared\system_shared;
+#using scripts\shared\util_shared;
+
+#insert scripts\shared\shared.gsh;
+
+#using scripts\shared\weapons\_weaponobjects;
+
+#using scripts\zm\_zm_utility;
+
+#define	POI_MAX_RADIUS				200
+#define	POI_HALF_HEIGHT				200
+#define	POI_INNER_SPACING			2
+#define	POI_RADIUS_FROM_EDGES		32
+#define POI_HEIGHT 					200
+
+#define SPIKE_POI_RANK				800
+#define SPIKE_CHARGE_TIME			15
+
+#precache("string", "PRESS ^3[{+melee}]^7 TO DETONATE SPIKE CHARGE");
+
+#namespace zm_weap_spike_launcher;
+
+function autoexec __init__system__(){
+	_arr = undefined;
+	system::register("zm_weap_spike_launcher", &__init__, &__main__, _arr);
+}
+
+function __init__(){
+}
+
+function __main__(){
+	callback::on_connect(&spikeLauncherTutorialWatcher);
+	callback::on_connect(&spikeLauncherWatcher);
+	callback::on_connect(&spikeUpgradeWatcher);
+
+	DEFAULT(level.monkey_attract_dist, 1536);
+	DEFAULT(level.num_monkey_attractors, 96);
+	DEFAULT(level.monkey_attract_dist_diff, 45);
+	DEFAULT(level.spike_attract_dist, level.monkey_attract_dist);
+	DEFAULT(level.num_spike_attractors, level.num_monkey_attractors);
+	DEFAULT(level.spike_attract_dist_diff, level.monkey_attract_dist_diff);
+}
+
+function setSpikeAttractDist(dist){
+	if(isdefined(dist) && dist >= 0){
+		level.spike_attract_dist = dist;
+	}
+}
+
+//Call On: Player
+function spikeLauncherWatcher(){
+	self weaponobjects::createSpikeLauncherWatcher("spike_launcher");
+	spike_watcher = self weaponobjects::createWeaponObjectWatcher("spike_charge", self.team);
+	spike_watcher.onSpawn = &spikeWatcher;
+}
+
+//Call On: Player
+//Callback on connect
+function spikeLauncherTutorialWatcher(){
+	wpn_spike_launcher = GetWeapon("spike_launcher");
+	self.spike_launcher_tutorial_complete = false;
+	w_current = self GetCurrentWeapon();
+	while(!self.spike_launcher_tutorial_complete){
+		if(w_current == wpn_spike_launcher){
+			self detonateWaitTill(wpn_spike_launcher);
+		}else{
+			self waittill("weapon_change_complete", w_current);
+		}
+	}
+}
+
+//Call On: Player
+function detonateWaitTill(wpn_spike_launcher){
+	self endon("death");
+	self waittill("weapon_fired", w_current);
+	if(w_current == wpn_spike_launcher){
+		wait(2);
+		self thread spikeLauncherTutorialHUD();
+		self util::waittill_any("detonate", "last_stand_detonate");
+		self.spike_launcher_tutorial_complete = true;
+	}
+}
+
+//Call On: Player
+function spikeLauncherTutorialHUD(){
+	self notify("spike_launcher_HUD");
+	self endon("spike_launcher_HUD");
+	font = "default";
+	fontscale = 2;
+	if(level.Splitscreen && !level.hidef){
+		fontscale = 3;
+	}
+	txt = self hud::createFontString(font, fontscale);
+	txt.vertalign = "bottom";
+	txt.y = -100;
+	txt.alpha = 0;
+	txt SetText("PRESS ^3[{+melee}]^7 TO DETONATE SPIKE CHARGE");
+	txt FadeOverTime(0.5);
+	txt.alpha = 1;
+
+	self util::waittill_any_timeout(20, "detonate", "last_stand_detonate");
+
+	txt FadeOverTime(0.5);
+	txt.alpha = 0;
+	wait(0.5);
+	txt Destroy();
+}
+
+//Call On: Player
+//Callback on connect
+function spikeUpgradeWatcher(){
+	self.spike_pois = [];
+
+	weapon = "spike_launcher_upgraded";
+	watcher = self weaponobjects::createUseWeaponObjectWatcher(weapon, self.team);
+	watcher.altName = "spike_charge_upgraded";
+	watcher.altWeapon = GetWeapon("spike_charge_upgraded");
+	watcher.altDetonate = false;
+	watcher.watchForFire = true;
+	watcher.hackable = true;
+	watcher.hackerToolRadius = level.equipmentHackerToolRadius;
+	watcher.hackerToolTimeMs = level.equipmentHackerToolTimeMs;
+	watcher.headIcon = false;
+	watcher.onDetonateCallback = &weaponobjects::spikeDetonate;
+	watcher.onStun = &weaponobjects::weaponStun;
+	watcher.stunTime = 1;
+	watcher.ownerGetsAssist = true;
+	watcher.detonateStationary = false;
+	watcher.detonationDelay = 0.0;
+	watcher.detonationSound = "wpn_claymore_alert";
+	watcher.onDetonateHandle = &upgradedSpikesDetonating;
+	self thread upgradedSpikeLauncherUpgradedItemCountChanged(watcher);
+
+	upgrade_spike_watcher = self weaponobjects::createWeaponObjectWatcher("spike_charge_upgraded", self.team);
+	upgrade_spike_watcher.onSpawn = &upgradedSpikeWatcher;
+	upgrade_spike_watcher.onDetonateCallback = &endSpikeAttractionOnDeath;
+}
+
+//Call On: Player
+function upgradedSpikesDetonating(watcher){
+	spike_count = weaponobjects::getSpikeLauncherActiveSpikeCount(watcher);
+	if ( spike_count > 0 )
+	{
+		self SetControllerUIModelValue( "spikeLauncherCounter.blasting", 1 );
+		wait 2;
+		self SetControllerUIModelValue( "spikeLauncherCounter.blasting", 0 );
+	}
+}
+
+//Call On: Player
+function upgradedSpikeLauncherUpgradedItemCountChanged(watcher){
+	self notify("uSLUICC");
+	self endon("uSLUICC");
+	self endon("death");
+	last_item_count = undefined;
+	while(true){
+		self waittill("weapon_change", weapon);
+		while(weapon.name == "spike_launcher_upgraded"){
+			current_item_count = weaponobjects::getSpikeLauncherActiveSpikeCount(watcher);
+			if(current_item_count !== last_item_count){
+				self SetControllerUIModelValue("spikeLauncherCounter.spikesReady", current_item_count);
+				last_item_count = current_item_count;
+			}
+			wait(0.1);
+			weapon = self GetCurrentWeapon();
+		}
+	}
+}
+
+//Call On: The spawned bolt
+function upgradedSpikeWatcher(watcher, owner){
+	IPrintLn("spike_fired");
+	self endon("death");
+	self thread detonateAfterTime(SPIKE_CHARGE_TIME, owner);
+	self util::waitTillNotMoving();
+	//the above filters only those spawned on a surface in
+
+	DEFAULT(level.spike_pois, []);
+	
+	//Get nav mesh position near this spike
+	b_valid_poi = zm_utility::check_point_in_enabled_zone(self.origin, undefined, undefined);
+	v_valid_poi = self move_valid_poi_to_navmesh(b_valid_poi);
+	if(v_valid_poi != (0, 0, 0)){
+		spike_poi = Spawn("script_origin", v_valid_poi);
+		spike_poi zm_utility::create_zombie_point_of_interest(
+			level.spike_attract_dist,
+			level.num_spike_attractors,
+			10000);
+		spike_poi thread zm_utility::create_zombie_point_of_interest_attractor_positions(
+			4, level.spike_attract_dist_diff
+		);
+		//spike_poi thread zm_utility::wait_for_attractor_positions_complete();
+		array::add(level.spike_pois, spike_poi);
+	}
+}
+
+//Call On: The spawned bolt/spike
+//Returns a valid poi location
+//If no valid location found, returns (0, 0, 0)
+function move_valid_poi_to_navmesh(b_valid_poi){
+	v_valid_poi = (0, 0, 0);
+	if(IsPointOnNavMesh(self.origin)){
+		v_valid_poi = self.origin;
+	}else{
+		//Find results on the nav mesh to make POI
+		query_result = PositionQuery_Source_Navigation(
+			self.origin, 0,
+			POI_MAX_RADIUS,
+			POI_HALF_HEIGHT,
+			POI_INNER_SPACING,
+			POI_RADIUS_FROM_EDGES
+		);
+		if(query_result.data.size > 0){
+			foreach(point in query_result.data){
+				//Check not too far off
+				height_delta = Abs(self.origin[2] - point.origin[2]);
+				if(!(height_delta > POI_HEIGHT)){
+					//Do bullet trace to make sure not going between walls
+					start = point.origin + (0, 0, 20);
+					end = self.origin + (0, 0, 20);
+					if(BulletTracePassed(start, end, false, self, undefined, false, false)){
+						//make the poi this valid location
+						v_valid_poi = point.origin;
+						break; //end the loop as point found
+					}
+				}
+			}
+		}
+	}
+	return v_valid_poi;
+}
+
+//Call On: The spawned bolt/spike
+function endSpikeAttractionOnDeath(attacker, weapon, target){
+	self thread weaponobjects::spikeDetonate(attacker, weapon, target);
+	foreach(poi in level.spike_pois){
+		//NOT WORKING AT THE MOMENT
+		poi zm_utility::deactivate_zombie_point_of_interest();
+		poi notify("death");
+		poi Delete();
+	}
+	self notify("death");
+	level.spike_pois = [];
+}
+
+//Call On: The spawned bolt
+function spikeWatcher(watcher, owner){
+	IPrintLn("spike_fired");
+	self thread detonateAfterTime(SPIKE_CHARGE_TIME, owner);
+}
+
+//Call On: spawned spike
+function detonateAfterTime(time, player){
+	player endon("detonate");
+	IPrintLn("called");
+	self util::waitTillNotMoving();
+	wait(time);
+	IPrintLn("detonate");
+	//self endSpikeAttractionOnDeath();
+	player notify("detonate");
+}
+```
+
+</details>
+
+#### Hello World in GSC
+
+[`View this example separately`](/GSC/HelloWorld/HelloWorld_InGSC.gsc)
+
+This is how you make a Hello World program in GSC:
+
+```gsc
+weapon = "Hello, World!";
+```
+
+_/!\ This example has not been tested yet, and may not work_ !-->
+
+#### Comments in GSC
+
+Comments in GSC are the same as in languages like C, C++, Java, etc.
+
+##### Single line comments
+
+[`View this example separately`](/GSC/Comments/Single-line/Single-lineComments_InGSC_V1.gsc)
+
+Single line comments in GSC are written like so:
+
+```gsc
+// This is a single line comment
+```
+
+##### Multi-line comments
+
+[`View this example separately`](/GSC/Comments/Multi-line/Multi-lineComments_InGSC.gsc)
+
+Multi-line comments in GSC are written like so:
+
+```gsc
+/* This is
+a multi-line
+comment
+*/
+/* This is
+* also a
+* multi-line
+* comment */
+```
+
+#### Break keyword in GSC
+
+[`View this example separately`](/GSC/Break-Keyword/BreakKeyword_InGSC.gsc)
+
+GSC supports the `break` keyword:
+
+```gsc
+break;
+```
+
+To this day, I am still not entirely sure what the `break` keyword does, but most languages support it.
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Functions in GSC
+
+[`View this example separately`](/GSC/Functions/Functions_InGSC.gsc)
+
+Functions are defined in GSC like so:
+
+```gsc
+function myFunction(){
+    break;
+}
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Returning a function in GSC
+
+[`View this example separately`](/GSC/Functions/ReturningAFunction/Returning_a_Function_InGSC.gsc)
+
+I think this is how you return a function in GSC:
+
+```gsc
+function testFunc(){
+    break;
+    return 1;
+}
+return testFunc();
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Defining a weapon
+
+[`View this example separately`](/GSC/DefineWeapon/Defining_a_Weapon_InGSC.gsc)
+
+Defining a Call of Duty weapon in GSC can be done like so:
+
+```gsc
+function spikeLauncherTutorialHUD(){
+	self notify("spike_launcher_HUD");
+	self endon("spike_launcher_HUD");
+}
+return spikeLauncherTutorialHUD();
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+##### Setting an alternative weapon name
+
+[`View this example separately`](/GSC/DefineWeapon/AlternativeName/SettingAnAlternativeWeaponName_InGSC.gsc)
+
+To set an alternative name for a weapon in GSC, you can do this:
+
+```gsc
+function spikeLauncherTutorialHUD(){
+	self notify("spike_launcher_HUD");
+	self endon("spike_launcher_HUD");
+	watcher.altName = "spike_charge_upgraded";
+}
+return spikeLauncherTutorialHUD();
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+##### Setting a shock duration
+
+[`View this example separately`](/GSC/DefineWeapon/ShockTimer/SettingAShockTimer_InGSC.gsc)
+
+Setting a shock duration to a weapons attack in GSC can be done like so:
+
+```gsc
+function spikeLauncherTutorialHUD(){
+	watcher.stunTime = 1;
+}
+return spikeLauncherTutorialHUD();
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+##### Fading the description
+
+[`View this example separately`](/GSC/DefineWeapon/FadeDescription/Fade_the_Description_InGSC.gsc)
+
+To fade the description over a duration of time in GSC, one must do it like so:
+
+```gsc
+txt FadeOverTime(0.5);
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+##### End at a players death
+
+[`View this example separately`](/GSC/DefineWeapon/EndAtDeath/EndAtDeath_InGSC.gsc)
+
+To end the function after the player character dies, this script can be used:
+
+```gsc
+self endon("death");
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+##### Wait until the current weapon is fired
+
+[`View this example separately`](/GSC/DefineWeapon/WaitUntilFired/WaitUntilWeaponIsFired_InGSC.gsc)
+
+To wait until the current weapon is fired before going to the next function, this script can be used:
+
+```gsc
+// w_current is the current weapon
+self waittill("weapon_fired", w_current);
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+##### Complete the tutorial
+
+[`View this example separately`](/GSC/DefineWeapon/CompleteWeaponTutorial/CompleteTheWeaponTutorial_InGSC.gsc)
+
+To complete the weapon usage tutorial, this script can be used:
+
+```gsc
+self.spike_launcher_tutorial_complete = true;
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Wait keyword in GSC
+
+[`View this example separately`](/GSC/Wait-Keyword/WaitKeyword_InGSC.gsc)
+
+GSC supports the `wait` keyword.
+
+```gsc
+wait(1.0);
+break;
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Setting up the font
+
+[`View this example separately`](/GSC/DefaultFont/SetFontToDefault_InGSC.gsc)
+
+To default the font to the game default, this script is used:
+
+```gsc
+font = "default";
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Change the font scale
+
+[`View this example separately`](/GSC/ChangeFontScale/ChangeFontScale_InGSC.gsc)
+
+To change the fontscale of text, this script can be used:
+
+```gsc
+fontscale = 2;
+```
+
+_/!\ This example has not been tested yet, and may not work_
 
 
-### Top
+#### If statements in GSC
 
-# `README.md`
+[`View this example separately`](/GSC/IfStatements/IfStatements_InGSC.gsc)
+
+`If` statements can be defined in GSC like so:
+
+```gsc
+if true {
+    fontscale = 2;
+    break;
+}
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### If else statements in GSC
+
+[`View this example separately`](/GSC/IfElseStatements/IfElse_Statements_InGSC.gsc)
+
+`If else` statements can be defined in GSC like so:
+
+```gsc
+if true {
+    fontscale = 2;
+    break;
+}else{
+    fontscale = 3;
+    break;
+}
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### While statements in GSC
+
+[`View this example separately`](/GSC/WhileStatement/WhileStatement_InGSC.gsc)
+
+`While` statements can be defined in GSC like so:
+
+```gsc
+while(true){
+    fontscale = 2;   
+}
+```
+
+_/!\ This example has not been tested yet, and may not work_
+
+#### Other knowledge of the GSC programming language
+
+1. GSC is a language for the Call of Duty series of video games
+
+2. GSC is a semicolon and curly bracket language
+
+3. GSC has syntax very similar to that of C, Java, and/or another language
+
+4. GSC uses the `*.gsc` file extension by default, but also uses the `*.gsh` and `*.csc` file extensions
+
+5. The `*.gsh` file extension can be confused with a Groovy programming language program.
+
+7. GSC is not one of the top 50 programming languages (as of 2022, July 31st, it has never ranked 50 or higher on the TIOBE index)
+
+8. GSC is a language recognized by GitHub, with the color `orange`
+
+9. No other knowledge of the GSC programming language
+
+#### Additional comments
+
+1. I discovered the GSC language by accident when making a Groovy source file with the extension `*.gsh` which according to Wikipedia was a Groovy file extension.
+
+2. I currently don't know what GSC stands for
+
+3. I currently don't know what year GSC was released on
+
+4. No other additional comments available
 
 ***
 
-## Read this article in a different language
+## File info
 
-**Sorted by:** `A-Z`
+**File type:** `Markdown document (*.md *.mkd *.mdown *.markdown)`
 
-[Sorting options unavailable](https://github.com/<developerName>/<repoName>)
+**File version:** `1 (2022, Wednesday, August 24th at 4:14 pm PST)`
 
-( [af Afrikaans](/.github/README_AF.md) Afrikaans | [sq Shqiptare](/.github/README_SQ.md) Albanian | [am አማርኛ](/.github/README_AM.md) Amharic | [ar عربى](/.github/README_AR.md) Arabic | [hy հայերեն](/.github/README_HY.md) Armenian | [az Azərbaycan dili](/.github/README_AZ.md) Azerbaijani | [eu Euskara](/.github/README_EU.md) Basque | [be Беларуская](/.github/README_BE.md) Belarusian | [bn বাংলা](/.github/README_BN.md) Bengali | [bs Bosanski](/.github/README_BS.md) Bosnian | [bg български](/.github/README_BG.md) Bulgarian | [ca Català](/.github/README_CA.md) Catalan | [ceb Sugbuanon](/.github/README_CEB.md) Cebuano | [ny Chichewa](/.github/README_NY.md) Chichewa | [zh-CN 简体中文](/.github/README_ZH-CN.md) Chinese (Simplified) | [zh-t 中國傳統的）](/.github/README_ZH-T.md) Chinese (Traditional) | [co Corsu](/.github/README_CO.md) Corsican | [hr Hrvatski](/.github/README_HR.md) Croatian | [cs čeština](/.github/README_CS.md) Czech | [da dansk](README_DA.md) Danish | [nl Nederlands](/.github/README_NL.md) Dutch | [**en-us English**](/.github/README.md) English |  [EO Esperanto](/.github/README_EO.md) Esperanto | [et Eestlane](/.github/README_ET.md) Estonian | [tl Pilipino](/.github/README_TL.md) Filipino | [fi Suomalainen](/.github/README_FI.md) Finnish |  [fr français](/.github/README_FR.md) French | [fy Frysk](/.github/README_FY.md) Frisian | [gl Galego](/.github/README_GL.md) Galician | [ka ქართველი](/.github/README_KA) Georgian | [de Deutsch](/.github/README_DE.md) German | [el Ελληνικά](/.github/README_EL.md) Greek | [gu ગુજરાતી](/.github/README_GU.md) Gujarati | [ht Kreyòl ayisyen](/.github/README_HT.md) Haitian Creole | [ha Hausa](/.github/README_HA.md) Hausa | [haw Ōlelo Hawaiʻi](/.github/README_HAW.md) Hawaiian | [he עִברִית](/.github/README_HE.md) Hebrew | [hi हिन्दी](/.github/README_HI.md) Hindi | [hmn Hmong](/.github/README_HMN.md) Hmong | [hu Magyar](/.github/README_HU.md) Hungarian | [is Íslenska](/.github/README_IS.md) Icelandic | [ig Igbo](/.github/README_IG.md) Igbo | [id bahasa Indonesia](/.github/README_ID.md) Icelandic | [ga Gaeilge](/.github/README_GA.md) Irish | [it Italiana/Italiano](/.github/README_IT.md) | [ja 日本語](/.github/README_JA.md) Japanese | [jw Wong jawa](/.github/README_JW.md) Javanese | [kn ಕನ್ನಡ](/.github/README_KN.md) Kannada | [kk Қазақ](/.github/README_KK.md) Kazakh | [km ខ្មែរ](/.github/README_KM.md) Khmer | [rw Kinyarwanda](/.github/README_RW.md) Kinyarwanda | [ko-south 韓國語](/.github/README_KO_SOUTH.md) Korean (South) | [ko-north 문화어](README_KO_NORTH.md) Korean (North) (NOT YET TRANSLATED) | [ku Kurdî](/.github/README_KU.md) Kurdish (Kurmanji) | [ky Кыргызча](/.github/README_KY.md) Kyrgyz | [lo ລາວ](/.github/README_LO.md) Lao | [la Latine](/.github/README_LA.md) Latin | [lt Lietuvis](/.github/README_LT.md) Lithuanian | [lb Lëtzebuergesch](/.github/README_LB.md) Luxembourgish | [mk Македонски](/.github/README_MK.md) Macedonian | [mg Malagasy](/.github/README_MG.md) Malagasy | [ms Bahasa Melayu](/.github/README_MS.md) Malay | [ml മലയാളം](/.github/README_ML.md) Malayalam | [mt Malti](/.github/README_MT.md) Maltese | [mi Maori](/.github/README_MI.md) Maori | [mr मराठी](/.github/README_MR.md) Marathi | [mn Монгол](/.github/README_MN.md) Mongolian | [my မြန်မာ](/.github/README_MY.md) Myanmar (Burmese) | [ne नेपाली](/.github/README_NE.md) Nepali | [no norsk](/.github/README_NO.md) Norwegian | [or ଓଡିଆ (ଓଡିଆ)](/.github/README_OR.md) Odia (Oriya) | [ps پښتو](/.github/README_PS.md) Pashto | [fa فارسی](/.github/README_FA.md) |Persian  [pl polski](/.github/README_PL.md) Polish | [pt português](/.github/README_PT.md) Portuguese | [pa ਪੰਜਾਬੀ](/.github/README_PA.md) Punjabi | No languages available that start with the letter Q | [ro Română](/.github/README_RO.md) Romanian | [ru русский](/.github/README_RU.md) Russian | [sm Faasamoa](/.github/README_SM.md) Samoan | [gd Gàidhlig na h-Alba](/.github/README_GD.md) Scots Gaelic | [sr Српски](/.github/README_SR.md) Serbian | [st Sesotho](/.github/README_ST.md) Sesotho | [sn Shona](/.github/README_SN.md) Shona | [sd سنڌي](/.github/README_SD.md) Sindhi | [si සිංහල](/.github/README_SI.md) Sinhala | [sk Slovák](/.github/README_SK.md) Slovak | [sl Slovenščina](/.github/README_SL.md) Slovenian | [so Soomaali](/.github/README_SO.md) Somali | [[es en español](/.github/README_ES.md) Spanish | [su Sundanis](/.github/README_SU.md) Sundanese | [sw Kiswahili](/.github/README_SW.md) Swahili | [sv Svenska](/.github/README_SV.md) Swedish | [tg Тоҷикӣ](/.github/README_TG.md) Tajik | [ta தமிழ்](/.github/README_TA.md) Tamil | [tt Татар](/.github/README_TT.md) Tatar | [te తెలుగు](/.github/README_TE.md) Telugu | [th ไทย](/.github/README_TH.md) Thai | [tr Türk](/.github/README_TR.md) Turkish | [tk Türkmenler](/.github/README_TK.md) Turkmen | [uk Український](/.github/README_UK.md) Ukrainian | [ur اردو](/.github/README_UR.md) Urdu | [ug ئۇيغۇر](/.github/README_UG.md) Uyghur | [uz O'zbek](/.github/README_UZ.md) Uzbek | [vi Tiếng Việt](/.github/README_VI.md) Vietnamese | [cy Cymraeg](/.github/README_CY.md) Welsh | [xh isiXhosa](/.github/README_XH.md) Xhosa | [yi יידיש](/.github/README_YI.md) Yiddish | [yo Yoruba](/.github/README_YO.md) Yoruba | [zu Zulu](/.github/README_ZU.md) Zulu ) Available in 110 languages (108 when not counting English and North Korean, as North Korean has not been translated yet [Read about it here](/OldVersions/Korean(North)/README.md))
-
-Translations in languages other than English are machine translated and are not yet accurate. No errors have been fixed yet as of March 21st 2021. Please report translation errors [here](https://github.com/<developerName>/<repoName>/issues/). Make sure to backup your correction with sources and guide me, as I don't know languages other than English well (I plan on getting a translator eventually) please cite [wiktionary](https://en.wiktionary.org) and other sources in your report. Failing to do so will result in a rejection of the correction being published.
-
-Note: due to limitations with GitHub's interpretation of markdown (and pretty much every other web-based interpretation of markdown) clicking these links will redirect you to a separate file on a separate page that isn't the intended page. You will be redirected to the [.github folder](/.github/) of this project, where the README translations are hosted.
-
-Translations are currently done with Bing translate and DeepL. Support for Google Translate translations is coming to a close due to privacy concerns.
+**Line count (including blank lines and compiler line):** `661`
 
 ***
 
-# Index
+## File history
 
-[00.0 - Top](#Top)
+<details><summary><p>Click/tap here to expand/collapse the history for this file</p></summary>
 
-> [00.1 - Title](#<projectName>)
-
-> [00.2 - Read this article in a different language](#Read-this-article-in-a-different-language)
-
-> [00.3 - Index](#Index)
-
-[01.0 - Description](#RepositoryName)
-
-[02.0 - About](#About)
-
-[03.0 - Wiki](#Wiki)
-
-[04.0 - History](#History)
-
-> [04.1 - Pre-history](#Pre-history)
-
-> [04.2 - Alpha History](#Alpha-history)
-
-> [04.3 - Beta History](#Beta-history)
-
-> [04.4 - Modern History](#Modern-history)
-
-[05.0 - Copying](#Copying)
-
-[06.0 - Credits](#Credits)
-
-[07.0 - Installation](#Installation)
-
-[08.0 - Version history](#Version-history)
-
-[09.0 - Version history](#Version-history)
-
-[10.0 - Software status](#Software-status)
-
-[11.0 - Sponsor info](#Sponsor-info)
-
-[12.0 - Contributers](#Contributers)
-
-[13.0 - Issues](#Issues)
-
-> [13.1 - Current issues](#Current-issues)
-
-> [13.2 - Past issues](#Past-issues)
-
-> [13.3 - Past pull requests](#Past-pull-requests)
-
-> [13.4 - Active pull requests](#Active-pull-requests)
-
-[14.0 - Resources](#Resources)
-
-[15.0 - Contributing](#Contributing)
-
-[16.0 - About README](#About-README)
-
-[17.0 - README Version history](#README-version-history)
-
-[18.0 - Footer](#You-have-reached-the-end-of-the-README-file)
-
-> [18.9 - End of file](#EOF)
-
-***
-
-# <repoName>
-<repo_description>
-
-***
-
-## About
-
-See above. <extendedRepoDescription>
-
-***
-
-## Wiki
-
-[Click/tap here to view this projects Wiki](https://github.com/<developerName>/<repoName>/wiki)
-
-If the project has been forked, the Wiki was likely removed. Luckily, I include an embedded version. You can view it [here](/External/ProjectWiki/).
-
-***
-
-## History
-
-Write about this projects history here.
-
-### Pre-history
-
-No pre-history to show for this project.
-
-### Alpha history
-
-No Alpha history to show for this project.
-
-### Beta history
-
-No Beta history to show for this project.
-
-### Modern history
-
-No Modern history to show for this project.
-
-***
-
-## Copying
-
-View the copying license for this project [here](/COPYING) (if you haven't built the project yet with the makefile, here is the original link: [COPYINGL](/COPYINGL)
-
-Please note that you also have to follow the rules of the GNU General Public License v3 (GPL3) which you can view [here](/LICENSE.txt)
-
-***
-
-## Credits
-
-View the credits file for this project and see the people who got together to make this project by [clicking/tapping here](/CREDITS)
-
-***
-
-## Installation
-
-View the installation instructions file for this project [here](/INSTALL)
-
-Requirements: Read the instructions for more info, and get the latest up-to-date instructions [here](https://gist.github.com/seanpm2001/745564a46186888e829fdeb9cda584de)
-
-***
-
-## Sponsor info
-
-![SponsorButton.png](/SponsorButton.png)
-
-You can sponsor this project if you like, but please specify what you want to donate to. [See the funds you can donate to here](https://github.com/seanpm2001/Sponsor-info/tree/main/For-sponsors/)
-
-You can view other sponsor info [here](https://github.com/seanpm2001/Sponsor-info/)
-
-Try it out! The sponsor button is right up next to the watch/unwatch button.
-
-***
-
-## Version history
-
-**Version history currently unavailable**
-
-**No other versions listed**
-
-***
-
-## Software status
-
-All of my works are free some restrictions. DRM (**D**igital **R**estrictions **M**anagement) is not present in any of my works.
-
-![DRM-free_label.en.svg](/DRM-free_label.en.svg)
-
-This sticker is supported by the Free Software Foundation. I never intend to include DRM in my works.
-
-I am using the abbreviation "Digital Restrictions Management" instead of the more known "Digital Rights Management" as the common way of addressing it is false, there are no rights with DRM. The spelling "Digital Restrictions Management" is more accurate, and is supported by [Richard M. Stallman (RMS)](https://en.wikipedia.org/wiki/Richard_Stallman) and the [Free Software Foundation (FSF)](https://en.wikipedia.org/wiki/Free_Software_Foundation)
-
-This section is used to raise awareness for the problems with DRM, and also to protest it. DRM is defective by design and is a major threat to all computer users and software freedom.
-
-Image credit: [defectivebydesign.org/drm-free/...](https://www.defectivebydesign.org/drm-free/how-to-use-label/)
-
-***
-
-## Contributers
-
-Currently, I am the only contributer. Contributing is allowed, as long as you follow the rules of the [CONTRIBUTING.md](/CONTRIBUTING.md) file.
-
-> * 1. [seanpm2001](https://github.com/seanpm2001/) - x commits (As of Yr, DoW, Month, DoM, at ##:## a/pm)
-
-> * 2. No other contributers.
-
-***
-
-## Issues
-
-### Current issues
-
-* None at the moment
-
-* No other current issues
-
-If the repository has been forked, issues likely have been removed. Luckily I keep an archive of certain images [here](/.github/Issues/)
-
-[Read the privacy policy on issue archival here](/.github/Issues/README.md)
-
-**TL;DR**
-
-I archive my own issues. Your issue won't be archived unless you request it to be archived.
-
-### Past issues
-
-* None at the moment
-
-* No other past issues
-
-If the repository has been forked, issues likely have been removed. Luckily I keep an archive of certain images [here](/.github/Issues/)
-
-[Read the privacy policy on issue archival here](/.github/Issues/README.md)
-
-**TL;DR**
-
-I archive my own issues. Your issue won't be archived unless you request it to be archived.
-
-### Past pull requests
-
-* None at the moment
-
-* No other past pull requests
-
-If the repository has been forked, issues likely have been removed. Luckily I keep an archive of certain images [here](/.github/Issues/)
-
-[Read the privacy policy on issue archival here](/.github/Issues/README.md)
-
-**TL;DR**
-
-I archive my own issues. Your issue won't be archived unless you request it to be archived.
-
-### Active pull requests
-
-* None at the moment
-
-* No other active pull requests
-
-If the repository has been forked, issues likely have been removed. Luckily I keep an archive of certain images [here](/.github/Issues/)
-
-[Read the privacy policy on issue archival here](/.github/Issues/README.md)
-
-**TL;DR**
-
-I archive my own issues. Your issue won't be archived unless you request it to be archived.
-
-***
-
-## Resources
-
-Here are some other resources for this project:
-
-[Project language file A](PROJECT_LANG_1.<fileExtensionForProgrammingLanguage>)
-
-[Join the discussion on GitHub](https://github.com/<developerName>/<repoName>/discussions)
-
-No other resources at the moment.
-
-***
-
-## Contributing
-
-Contributing is allowed for this project, as long as you follow the rules of the `CONTRIBUTING.md` file.
-
-[Click/tap here to view the contributing rules for this project](/CONTRIBUTING.md)
-
-***
-
-## About README
-
-**File type:** `Markdown Document (*.md *.mkd *.markdown)`
-
-**File version:** `0.1.6 (Monday, August 23rd 2021 at 6:37 pm)`
-
-**Line count (including blank lines and compiler line):** `0,407`
-
-***
-
-## README version history
-
-Version 0.1 (Sunday, March 21st 2021 at 7:50 pm)
+<details><summary><p><b>Version 1 (2022, Wednesday, August 24th at 4:14 pm PST)</b></p></summary>
 
 > Changes:
 
 > * Started the file
 
-> * Added the title section
+> * Added the `title` section
 
-> * Added the index
+> * Added the `Hello World in GSC` section
 
-> * Added the about section
+> * Added the `Comments in GSC` section
 
-> * Added the Wiki section
+> > * Added the `Single line comments` subsection
 
-> * Added the version history section
+> > * Added the `Multi-line comments` subsection
 
-> * Added the issues section.
+> * Added the `break keyword in GSC` section
 
-> * Added the past issues section
+> * Added the `Functions in GSC` section
 
-> * Added the past pull requests section
+> * Added the `Returning a function in GSC` section
 
-> * Added the active pull requests section
+> * Added the `Defining a weapon` section
 
-> * Added the contributors section
+> > * Added the `Setting an alternative weapon name` subsection
 
-> * Added the contributing section
+> > * Added the `Setting a shock duration` subsection
 
-> * Added the about README section
+> > * Added the `Fading the description` subsection
 
-> * Added the README version history section
+> > * Added the `End at a players death` subsection
 
-> * Added the resources section
+> > * Added the `Complete the tutorial` subsection
 
-> * Added a software status section, with a DRM free sticker and message
+> * Added the `Wait keyword in GSC` section
 
-> * Added the sponsor info section
+> * Added the `Setting up the font` section
 
-**ITERATION 5**
+> * Added the `Change the font scale` section
 
-> * Updated the title section
+> * Added the `If statements in GSC` section
 
-> * Updated the index
+> * Added the `If else statements in GSC` section
 
-> * Added the history section
+> * Added the `While statements in GSC` section
 
-> * Updated the file info section
+> * Added the `other knowledge of the GSC programming language` section
 
-> * Updated the file history section
+> * Added the `Additional comments` section
 
-**ITERATION 6**
+> * Added the `file info` section
 
-> * Updated the title section
-
-> * Fixed and update template links
-
-> * Updated the index
-
-> * Added the copying section
-
-> * Added the credits section
-
-> * Added the installation section
-
-> * Updated the resources section
-
-> * Updated the contributors section
-
-> * Added the technical notes section
-
-> * Updated the footer
-
-> * Updated the file info section
-
-> * Updated the file history section
-
-> * No other changes in version 0.1
-
-Version 1 (Coming soon)
-
-> Changes:
-
-> * Coming soon
+> * Added the `file history` section
 
 > * No other changes in version 1
 
-Version 2 (Coming soon)
+</details>
 
-> Changes:
-
-> * Coming soon
-
-> * No other changes in version 2
-
-***
-
-### You have reached the end of the README file
-
-( [Back to top](#Top) | [Exit to GitHub](https://github.com) | [Exit to Bing](https://www.bing.com/) | [Exit to DuckDuckGo](https://duckduckgo.com/) | [Exit to Ecosia](https://www.ecosia.org) )
-
-### EOF
+</details>
 
 ***
